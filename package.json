@@ -1,0 +1,20 @@
+{
+  "name": "idle-gc",
+  "version": "1.0.0",
+  "description": "Run the V8 GC when node.js is idle.",
+  "keywords": ["gc", "garbage collector"],
+  "homepage": "https://github.com/bnoordhuis/node-idle-gc",
+  "main": "build/Release/idle-gc.node",
+  "author": {
+    "name": "Ben Noordhuis",
+    "email": "info@bnoordhuis.nl",
+    "url": "http://bnoordhuis.nl/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/bnoordhuis/node-idle-gc.git"
+  },
+  "engines": {
+    "node": ">=0.9.5"
+  }
+}
