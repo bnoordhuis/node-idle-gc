@@ -14,6 +14,9 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include "compat.h"
+#include "compat-inl.h"
+
 #include "node.h"
 #include "uv.h"
 #include "v8.h"
@@ -23,20 +26,13 @@
 
 namespace {
 
-using v8::Arguments;
-using v8::FunctionTemplate;
-using v8::Handle;
-using v8::HandleScope;
-using v8::Object;
-using v8::String;
-using v8::Undefined;
-using v8::V8;
-using v8::Value;
+namespace C = ::compat;
 
 typedef enum { STOP, RUN, PAUSE } gc_state_t;
 
 bool trace_gc;
 int64_t interval;
+v8::Isolate* isolate;
 gc_state_t state;
 gc_state_t prev_state;
 uv_timer_t timer_handle;
@@ -51,50 +47,69 @@ void Trace()
          states[state]);
 }
 
-void Timer(uv_timer_t*, int)
+bool IdleNotification()
 {
-  if (V8::IdleNotification()) state = PAUSE;
+#if NODE_VERSION_AT_LEAST(0, 12, 0)
+  static const int idle_time_in_ms = 5;
+  return isolate->IdleNotification(idle_time_in_ms);
+#else
+  return v8::V8::IdleNotification();
+#endif
+}
+
+void Timer(uv_timer_t*)
+{
+  if (IdleNotification()) state = PAUSE;
   if (trace_gc) Trace();
 }
 
-void Check(uv_check_t*, int)
+void Check(uv_check_t*)
 {
   prev_state = state;
 }
 
-void Prepare(uv_prepare_t*, int)
+void Prepare(uv_prepare_t*)
 {
   if (state == PAUSE && prev_state == PAUSE) state = RUN;
-  if (state == RUN) uv_timer_start(&timer_handle, Timer, interval, 0);
+  if (state == RUN) {
+    uv_timer_start(&timer_handle, reinterpret_cast<uv_timer_cb>(Timer),
+                   interval, 0);
+  }
 }
 
-Handle<Value> Stop(const Arguments& args)
+void Stop()
 {
   state = STOP;
   uv_timer_stop(&timer_handle);
   uv_check_stop(&check_handle);
   uv_prepare_stop(&prepare_handle);
-  return Undefined();
 }
 
-Handle<Value> Start(const Arguments& args)
+C::ReturnType Stop(const C::ArgumentType& args)
 {
-  HandleScope scope;
-  Stop(args);
+  C::ReturnableHandleScope handle_scope(args);
+  Stop();
+  return handle_scope.Return();
+}
+
+C::ReturnType Start(const C::ArgumentType& args)
+{
+  C::ReturnableHandleScope handle_scope(args);
+  Stop();
 
   interval = args[0]->IsNumber() ? args[0]->IntegerValue() : 0;
   if (interval <= 0) interval = 5000;  // Default to 5 seconds.
 
   state = RUN;
-  uv_check_start(&check_handle, Check);
-  uv_prepare_start(&prepare_handle, Prepare);
+  uv_check_start(&check_handle, reinterpret_cast<uv_check_cb>(Check));
+  uv_prepare_start(&prepare_handle, reinterpret_cast<uv_prepare_cb>(Prepare));
 
-  return Undefined();
+  return handle_scope.Return();
 }
 
-void Init(Handle<Object> obj)
+void Init(v8::Local<v8::Object> obj)
 {
-  HandleScope scope;
+  isolate = v8::Isolate::GetCurrent();
 
   uv_timer_init(uv_default_loop(), &timer_handle);
   uv_check_init(uv_default_loop(), &check_handle);
@@ -103,8 +118,18 @@ void Init(Handle<Object> obj)
   uv_unref(reinterpret_cast<uv_handle_t*>(&check_handle));
   uv_unref(reinterpret_cast<uv_handle_t*>(&prepare_handle));
 
-  obj->Set(String::New("stop"), FunctionTemplate::New(Stop)->GetFunction());
-  obj->Set(String::New("start"), FunctionTemplate::New(Start)->GetFunction());
+  obj->Set(C::String::NewFromUtf8(isolate, "stop"),
+           C::FunctionTemplate::New(isolate, Stop)->GetFunction());
+  obj->Set(C::String::NewFromUtf8(isolate, "start"),
+           C::FunctionTemplate::New(isolate, Start)->GetFunction());
+
+#if NODE_VERSION_AT_LEAST(1, 0, 0)
+  // v8::Isolate::IdleNotification() is a no-op without --use_idle_notification.
+  {
+    static const char flag[] = "--use_idle_notification";
+    v8::V8::SetFlagsFromString(flag, sizeof(flag) - 1);
+  }
+#endif
 
   const char* var = getenv("IDLE_GC_TRACE");
   trace_gc = (var != NULL && atoi(var) != 0);

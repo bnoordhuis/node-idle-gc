@@ -1,6 +1,6 @@
 {
   "name": "idle-gc",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Run the V8 GC when node.js is idle.",
   "keywords": ["gc", "garbage collector"],
   "homepage": "https://github.com/bnoordhuis/node-idle-gc",
